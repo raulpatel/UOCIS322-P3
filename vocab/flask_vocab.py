@@ -30,7 +30,7 @@ app.secret_key = CONFIG.SECRET_KEY  # Should allow using session variables
 # neither of which would be suitable for responding keystroke by keystroke.
 
 WORDS = Vocab(CONFIG.VOCAB)
-
+NUM = min(len(WORDS.as_list()), CONFIG.SUCCESS_AT_COUNT)
 
 ###
 # Pages
@@ -74,7 +74,7 @@ def success():
 #   a JSON request handler
 #######################
 
-@app.route("/_check", methods=["POST"])
+@app.route("/_check", methods=["GET"])
 def check():
     """
     User has submitted the form with a word ('attempt')
@@ -87,35 +87,28 @@ def check():
     app.logger.debug("Entering check")
 
     # The data we need, from form and from cookie
-    text = flask.request.form["attempt"]
+    # text = flask.request.form["attempt"]
+    text = flask.request.args.get("text", type=str)
     jumble = flask.session["jumble"]
     matches = flask.session.get("matches", [])  # Default to empty list
 
     # Is it good?
     in_jumble = LetterBag(jumble).contains(text)
     matched = WORDS.has(text)
+    success = False
 
     # Respond appropriately
     if matched and in_jumble and not (text in matches):
         # Cool, they found a new word
         matches.append(text)
         flask.session["matches"] = matches
-    elif text in matches:
-        flask.flash("You already found {}".format(text))
-    elif not matched:
-        flask.flash("{} isn't in the list of words".format(text))
-    elif not in_jumble:
-        flask.flash(
-            '"{}" can\'t be made from the letters {}'.format(text, jumble))
-    else:
-        app.logger.debug("This case shouldn't happen!")
-        assert False  # Raises AssertionError
+        flask.session["target_count"] -= 1
+        success = True
 
-    # Choose page:  Solved enough, or keep going?
-    if len(matches) >= flask.session["target_count"]:
-       return flask.redirect(flask.url_for("success"))
-    else:
-       return flask.redirect(flask.url_for("keep_going"))
+    rslt = { "found" : success, "cont" : len(matches) != NUM, "remain" : NUM - len(matches),
+             "matched" : matches, "repeated" : text in matches, "invalid" : not matched, "notjumble" : not in_jumble }
+    # AJAX handler
+    return flask.jsonify(result=rslt)
 
 
 ###############
